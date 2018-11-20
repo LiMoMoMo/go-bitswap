@@ -52,6 +52,9 @@ const (
 )
 
 var (
+	// Used for experimental go-ipfs providing system
+	ProvideEnabled = true
+
 	HasBlockBufferSize    = 256
 	provideKeysBufferSize = 2048
 	provideWorkerMax      = 6
@@ -273,11 +276,13 @@ func (bs *Bitswap) receiveBlockFrom(blk blocks.Block, from peer.ID) error {
 
 	bs.engine.AddBlock(blk)
 
-	select {
-	case bs.newBlocks <- blk.Cid():
-		// send block off to be reprovided
-	case <-bs.process.Closing():
-		return bs.process.Close()
+	if ProvideEnabled {
+		select {
+		case bs.newBlocks <- blk.Cid():
+			// send block off to be reprovided
+		case <-bs.process.Closing():
+			return bs.process.Close()
+		}
 	}
 	return nil
 }
