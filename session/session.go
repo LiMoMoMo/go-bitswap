@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
@@ -13,6 +14,7 @@ import (
 	loggables "github.com/libp2p/go-libp2p-loggables"
 	peer "github.com/libp2p/go-libp2p-peer"
 
+	bandwidth "github.com/LiMoMoMo/go-bitswap-bandwidth"
 	bssrs "github.com/ipfs/go-bitswap/sessionrequestsplitter"
 )
 
@@ -40,6 +42,7 @@ type PeerManager interface {
 // RequestSplitter provides an interface for splitting
 // a request for Cids up among peers.
 type RequestSplitter interface {
+	SetBD(bd *bandwidth.BandWidth)
 	SplitRequest([]peer.ID, []cid.Cid) []*bssrs.PartialRequest
 	RecordDuplicateBlock()
 	RecordUniqueBlock()
@@ -87,6 +90,8 @@ type Session struct {
 	notif notifications.PubSub
 	uuid  logging.Loggable
 	id    uint64
+	// bandwidth
+	bd *bandwidth.BandWidth
 }
 
 // New creates a new bitswap session whose lifetime is bounded by the
@@ -105,17 +110,20 @@ func New(ctx context.Context, id uint64, wm WantManager, pm PeerManager, srs Req
 		wm:            wm,
 		pm:            pm,
 		srs:           srs,
-		incoming:      make(chan blkRecv),
+		incoming:      make(chan blkRecv, 10),
 		notif:         notifications.New(),
 		uuid:          loggables.Uuid("GetBlockRequest"),
 		baseTickDelay: time.Millisecond * 500,
 		id:            id,
+		bd:            bandwidth.New(ctx),
 	}
 
 	cache, _ := lru.New(2048)
 	s.interest = cache
 
 	go s.run(ctx)
+	go s.bd.Start()
+	s.srs.SetBD(s.bd)
 
 	return s
 }
@@ -172,6 +180,7 @@ func (s *Session) InterestedIn(c cid.Cid) bool {
 
 // GetBlock fetches a single block.
 func (s *Session) GetBlock(parent context.Context, k cid.Cid) (blocks.Block, error) {
+	fmt.Println("GetBlock", k)
 	return bsgetter.SyncGetBlock(parent, k, s.GetBlocks)
 }
 
@@ -267,6 +276,14 @@ func (s *Session) handleIncomingBlock(ctx context.Context, blk blkRecv) {
 		s.pm.RecordPeerResponse(blk.from, blk.blk.Cid())
 	}
 
+	//
+	tval, ok := s.liveWants[blk.blk.Cid()]
+	if ok {
+		last := time.Since(tval)
+		s.bd.ReceiveBlock(blk.from, len(blk.blk.RawData()), last)
+	}
+	//
+
 	s.receiveBlock(ctx, blk.blk)
 
 	s.resetTick()
@@ -300,15 +317,15 @@ func (s *Session) handleCancel(keys []cid.Cid) {
 func (s *Session) handleTick(ctx context.Context) {
 
 	live := make([]cid.Cid, 0, len(s.liveWants))
-	now := time.Now()
-	for c := range s.liveWants {
-		live = append(live, c)
-		s.liveWants[c] = now
-	}
+	// now := time.Now()
+	// for c := range s.liveWants {
+	// 	live = append(live, c)
+	// 	s.liveWants[c] = now
+	// }
 
 	// Broadcast these keys to everyone we're connected to
-	s.pm.RecordPeerRequests(nil, live)
-	s.wm.WantBlocks(ctx, live, nil, s.id)
+	// s.pm.RecordPeerRequests(nil, live)
+	// s.wm.WantBlocks(ctx, live, nil, s.id)
 
 	if len(live) > 0 {
 		s.pm.FindMorePeers(ctx, live[0])
@@ -378,9 +395,15 @@ func (s *Session) wantBlocks(ctx context.Context, ks []cid.Cid) {
 		s.liveWants[c] = now
 	}
 	peers := s.pm.GetOptimizedPeers()
+	fmt.Println("GetOptimizedPeers", peers)
+	fmt.Println(ks)
 	if len(peers) > 0 {
 		splitRequests := s.srs.SplitRequest(peers, ks)
 		for _, splitRequest := range splitRequests {
+			//
+			fmt.Println(len(splitRequest.Keys))
+			s.bd.SendBlocks(splitRequest.Peers[0], len(splitRequest.Keys))
+			//
 			s.pm.RecordPeerRequests(splitRequest.Peers, splitRequest.Keys)
 			s.wm.WantBlocks(ctx, splitRequest.Keys, splitRequest.Peers, s.id)
 		}
@@ -415,4 +438,22 @@ func (s *Session) wantBudget() int {
 		budget = 0
 	}
 	return budget
+}
+
+// Disconnected handle peer disconnected
+func (s *Session) Disconnected(p peer.ID) {
+	if !s.bd.Has(p) {
+		return
+	}
+	live := make([]cid.Cid, 0, len(s.liveWants))
+	now := time.Now()
+	for c := range s.liveWants {
+		live = append(live, c)
+		s.liveWants[c] = now
+	}
+	fmt.Println("DisConnected", p.Pretty())
+	fmt.Println("Resend cids", live)
+	// Broadcast these keys to everyone we're connected to
+	s.pm.RecordPeerRequests(nil, live)
+	s.wm.WantBlocks(s.ctx, live, nil, s.id)
 }

@@ -2,6 +2,7 @@ package sessionmanager
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	blocks "github.com/ipfs/go-block-format"
@@ -15,6 +16,7 @@ import (
 // Session is a session that is managed by the session manager
 type Session interface {
 	exchange.Fetcher
+	Disconnected(p peer.ID)
 	InterestedIn(cid.Cid) bool
 	ReceiveBlockFrom(peer.ID, blocks.Block)
 	UpdateReceiveCounters(blocks.Block)
@@ -67,6 +69,8 @@ func New(ctx context.Context, sessionFactory SessionFactory, peerManagerFactory 
 func (sm *SessionManager) NewSession(ctx context.Context) exchange.Fetcher {
 	id := sm.GetNextSessionID()
 	sessionctx, cancel := context.WithCancel(ctx)
+
+	fmt.Println("New Session", id)
 
 	pm := sm.peerManagerFactory(sessionctx, id)
 	srs := sm.requestSplitterFactory(sessionctx)
@@ -130,5 +134,12 @@ func (sm *SessionManager) UpdateReceiveCounters(blk blocks.Block) {
 
 	for _, s := range sm.sessions {
 		s.session.UpdateReceiveCounters(blk)
+	}
+}
+
+//
+func (sm *SessionManager) PeerDisconnected(p peer.ID) {
+	for _, ses := range sm.sessions {
+		ses.session.Disconnected(p)
 	}
 }

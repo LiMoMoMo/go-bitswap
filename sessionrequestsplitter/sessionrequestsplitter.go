@@ -2,7 +2,9 @@ package sessionrequestsplitter
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/LiMoMoMo/go-bitswap-bandwidth"
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p-peer"
 )
@@ -35,6 +37,8 @@ type SessionRequestSplitter struct {
 	receivedCount          int
 	split                  int
 	duplicateReceivedCount int
+	// bandwidth
+	bd *bandwidth.BandWidth
 }
 
 // New returns a new SessionRequestSplitter.
@@ -46,6 +50,11 @@ func New(ctx context.Context) *SessionRequestSplitter {
 	}
 	go srs.run()
 	return srs
+}
+
+//SetBD set bandwidth ptr for splitter
+func (srs *SessionRequestSplitter) SetBD(bd *bandwidth.BandWidth) {
+	srs.bd = bd
 }
 
 // SplitRequest splits a request for the given cids one or more times among the
@@ -106,21 +115,52 @@ type splitRequestMessage struct {
 	resp  chan []*PartialRequest
 }
 
+// func (s *splitRequestMessage) handle(srs *SessionRequestSplitter) {
+// 	split := srs.split
+// 	peers := s.peers
+// 	ks := s.ks
+
+// 	// split = len(peers)
+
+// 	if len(peers) < split {
+// 		split = len(peers)
+// 	}
+
+// 	peerSplits := splitPeers(peers, split)
+
+// 	if len(ks) < split {
+// 		split = len(ks)
+// 	}
+// 	//
+// 	keySplits := splitKeys(ks, split)
+// 	fmt.Println("Split", peerSplits, keySplits)
+// 	splitRequests := make([]*PartialRequest, len(keySplits))
+// 	for i := range splitRequests {
+// 		splitRequests[i] = &PartialRequest{peerSplits[i], keySplits[i]}
+// 	}
+// 	s.resp <- splitRequests
+// }
+
 func (s *splitRequestMessage) handle(srs *SessionRequestSplitter) {
 	split := srs.split
 	peers := s.peers
 	ks := s.ks
-	if len(peers) < split {
-		split = len(peers)
-	}
-	peerSplits := splitPeers(peers, split)
+	split = len(peers)
 	if len(ks) < split {
 		split = len(ks)
 	}
-	keySplits := splitKeys(ks, split)
-	splitRequests := make([]*PartialRequest, len(keySplits))
-	for i := range splitRequests {
-		splitRequests[i] = &PartialRequest{peerSplits[i], keySplits[i]}
+	//
+	result := srs.bd.Split(peers, ks)
+	if len(result) == 0 {
+		return
+	}
+	splitRequests := make([]*PartialRequest, len(result))
+	index := 0
+	fmt.Println("SplitRequest cids", len(ks))
+	for k, cs := range result {
+		splitRequests[index] = &PartialRequest{[]peer.ID{k}, cs}
+		fmt.Println("SPLIT", k.Pretty(), len(cs), cs)
+		index++
 	}
 	s.resp <- splitRequests
 }
