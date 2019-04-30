@@ -15,7 +15,6 @@ import (
 	peer "github.com/libp2p/go-libp2p-peer"
 
 	bandwidth "github.com/LiMoMoMo/go-bitswap-bandwidth"
-	bssrs "github.com/ipfs/go-bitswap/sessionrequestsplitter"
 )
 
 const (
@@ -43,7 +42,7 @@ type PeerManager interface {
 // a request for Cids up among peers.
 type RequestSplitter interface {
 	SetBD(bd *bandwidth.BandWidth)
-	SplitRequest([]peer.ID, []cid.Cid) []*bssrs.PartialRequest
+	SplitRequest([]peer.ID, []cid.Cid) []*bandwidth.PartialRequest
 	RecordDuplicateBlock()
 	RecordUniqueBlock()
 }

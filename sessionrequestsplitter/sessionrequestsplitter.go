@@ -2,7 +2,6 @@ package sessionrequestsplitter
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/LiMoMoMo/go-bitswap-bandwidth"
 	"github.com/ipfs/go-cid"
@@ -59,8 +58,8 @@ func (srs *SessionRequestSplitter) SetBD(bd *bandwidth.BandWidth) {
 
 // SplitRequest splits a request for the given cids one or more times among the
 // given peers.
-func (srs *SessionRequestSplitter) SplitRequest(peers []peer.ID, ks []cid.Cid) []*PartialRequest {
-	resp := make(chan []*PartialRequest, 1)
+func (srs *SessionRequestSplitter) SplitRequest(peers []peer.ID, ks []cid.Cid) []*bandwidth.PartialRequest {
+	resp := make(chan []*bandwidth.PartialRequest, 1)
 
 	select {
 	case srs.messages <- &splitRequestMessage{peers, ks, resp}:
@@ -112,7 +111,7 @@ func (srs *SessionRequestSplitter) duplicateRatio() float64 {
 type splitRequestMessage struct {
 	peers []peer.ID
 	ks    []cid.Cid
-	resp  chan []*PartialRequest
+	resp  chan []*bandwidth.PartialRequest
 }
 
 // func (s *splitRequestMessage) handle(srs *SessionRequestSplitter) {
@@ -134,34 +133,18 @@ type splitRequestMessage struct {
 // 	//
 // 	keySplits := splitKeys(ks, split)
 // 	fmt.Println("Split", peerSplits, keySplits)
-// 	splitRequests := make([]*PartialRequest, len(keySplits))
+// 	splitRequests := make([]*bandwidth.PartialRequest, len(keySplits))
 // 	for i := range splitRequests {
-// 		splitRequests[i] = &PartialRequest{peerSplits[i], keySplits[i]}
+// 		splitRequests[i] = &bandwidth.PartialRequest{peerSplits[i], keySplits[i]}
 // 	}
 // 	s.resp <- splitRequests
 // }
 
 func (s *splitRequestMessage) handle(srs *SessionRequestSplitter) {
-	split := srs.split
 	peers := s.peers
 	ks := s.ks
-	split = len(peers)
-	if len(ks) < split {
-		split = len(ks)
-	}
 	//
-	result := srs.bd.Split(peers, ks)
-	if len(result) == 0 {
-		return
-	}
-	splitRequests := make([]*PartialRequest, len(result))
-	index := 0
-	fmt.Println("SplitRequest cids", len(ks))
-	for k, cs := range result {
-		splitRequests[index] = &PartialRequest{[]peer.ID{k}, cs}
-		fmt.Println("SPLIT", k.Pretty(), len(cs), cs)
-		index++
-	}
+	splitRequests := srs.bd.Split(peers, ks)
 	s.resp <- splitRequests
 }
 
